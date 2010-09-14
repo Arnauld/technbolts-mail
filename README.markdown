@@ -1,8 +1,8 @@
 Start/Stop pop3 server
 =======================
 
-Start ~~~> sbt run runner.Pop3ServerRunner
-Stop  ~~~> echo +STOP | curl --data-ascii - telnet://localhost:111
+* Start ~~~> sbt run runner.Pop3ServerRunner
+* Stop  ~~~> echo +STOP | curl --data-ascii - telnet://localhost:111
 
 
 Lift Project setup
