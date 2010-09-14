@@ -21,15 +21,17 @@ class Mailbox(user:User, rootDir:File) {
 
   def getSizeOfAllMessage:Long = messages.foldLeft(0L)((acc,msg) => acc+msg.size)
 
-  private def messages:Array[Message] = mailboxDir.listFiles(new FileFilter {
-    def accept(file: File) = !file.isDirectory && file.getName.toLowerCase.endsWith(".eml")
-  }).map( (f:File) => {new Message(f)})
-
-  private def orderedMessages:Array[Message] =
-    messages.sortWith((msg1:Message,msg2:Message) => msg1.timestamp < msg2.timestamp)
+  lazy val messages:Array[Message] = loadMessages
+  private def loadMessages = {
+    val files = mailboxDir.listFiles(new FileFilter {
+      def accept(file: File) = !file.isDirectory && file.getName.toLowerCase.endsWith(".eml")
+    })
+    val msgs = files.map( (f:File) => {new Message(f)})
+    msgs.sortWith((msg1:Message,msg2:Message) => msg1.timestamp < msg2.timestamp)
+  }
 
   def getMessage(idx:Int):Option[Message] = {
-    val msgs = orderedMessages
+    val msgs = messages
     if(idx<msgs.size)
       Some(msgs(idx))
     else
