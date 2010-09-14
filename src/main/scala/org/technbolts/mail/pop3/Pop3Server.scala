@@ -6,6 +6,7 @@ import org.slf4j.{Logger, LoggerFactory}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import org.apache.commons.io.IOUtils
 import java.io._
+import org.technbolts.util.LangUtils
 
 object Pop3Server {
   def apply(port: Int) = new Pop3Server(port)
@@ -47,7 +48,7 @@ class Pop3Server(port: Int) {
         /**Reader to read data from the client */
         val in: BufferedReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-        new Thread(new Pop3Handler(this, pid, in, out, () => {socket.close})).start
+        new Thread(new Pop3Handler(pid, in, out, handleServerCommands, () => {socket.close})).start
 
       } catch {
         case e: SocketTimeoutException =>
@@ -58,14 +59,28 @@ class Pop3Server(port: Int) {
     }
   }
 
-  def stop:Unit = {
+  /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   * Server based commands
+   * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+  def handleServerCommands: PartialFunction[Pop3Command, Unit] = {
+    case Pop3Command("+STOP", _) =>
+      stop
+      throw new QuitException
+  }
+
+
+  def stop: Unit = {
     logger.info("Stop required, bye!")
     running.set(false)
   }
 }
 
-class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writer: PrintWriter, val onExit: () => Unit) extends ProtocolSupport with Runnable {
-  import Pop3Commands._
+class Pop3Handler(val pid: String,
+                  val _reader: BufferedReader,
+                  val _writer: PrintWriter,
+                  val handleServerCommands: PartialFunction[Pop3Command, Unit],
+                  val onExit: () => Unit) extends ProtocolSupport with Runnable {
+  import Pop3Command._
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[Pop3Handler])
 
@@ -77,10 +92,10 @@ class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writ
 
   def run: Unit = {
     try {
-      writeOk("Welcome!")
+
 
       val firstCommand = readCommand
-      (readServerCommands orElse handlePop3Command)(firstCommand)
+      (handleServerCommands orElse handlePop3Command)(firstCommand)
 
     } catch {
       case q: QuitException => logger.info("Quit asked, bye!")
@@ -91,33 +106,23 @@ class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writ
   }
 
   def handlePop3Command: PartialFunction[Pop3Command, Unit] = {
-    case command:Pop3Command => {
+    case command: Pop3Command => {
       val user = authenticate(command)
       mailbox = new Mailbox(user, new File("D:\\data\\mailboxes"))
-      logger.info("Mailbox for user " + user.login +" opened in: " + mailbox.mailboxDir.getAbsolutePath)
       while (true)
         handleCommand
     }
   }
 
   /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   * Server based commands
-   * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  def readServerCommands: PartialFunction[Pop3Command, Unit] = {
-    case Pop3Command("+STOP", _) =>
-      server.stop
-      throw new QuitException
-  }
-
-  /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    * Shared commands
    * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  def readUnsupported: PartialFunction[Pop3Command, Unit] = {
+  def handleUnsupported: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(command, _) => throw new UnsupportedCommandException("Unsupported command: " + command)
   }
 
-  def readQuit: PartialFunction[Pop3Command, Unit] = {
+  def handleQuit: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(QUIT, _) => throw new QuitException
   }
 
@@ -125,23 +130,23 @@ class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writ
    * Authorization state commands
    * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  def authenticate(pop3Command:Pop3Command): User = {
+  def authenticate(pop3Command: Pop3Command): User = {
     logger.info(pid + " Authorization phase, waiting for user and password commands")
 
     val user = new User(null, null)
-    val authPF = readUser(user) orElse readPassword(user) orElse readQuit orElse readUnsupported
+    val authPF = handleUser(user) orElse handlePassword(user) orElse handleQuit orElse handleUnsupported
 
     var command = pop3Command
     do {
       authPF(command)
-      command = if(user.isComplete) null else readCommand
+      command = if (user.isComplete) null else readCommand
     }
-    while(!user.isComplete)
+    while (!user.isComplete)
     logger.info(pid + " Authorization phase sucessfull, user: " + user + " entering in transaction state")
     user
   }
 
-  def readUser(user: User): PartialFunction[Pop3Command, Unit] = {
+  def handleUser(user: User): PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(USER, None) =>
       logger.info(pid + " No user provided")
       writeErr("No user provided")
@@ -151,7 +156,7 @@ class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writ
       user.login = login
   }
 
-  def readPassword(user: User): PartialFunction[Pop3Command, Unit] = {
+  def handlePassword(user: User): PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(PASS, None) =>
       logger.info(pid + " No password provided")
       writeErr("No password provided")
@@ -165,69 +170,94 @@ class Pop3Handler(server:Pop3Server, pid: String, _reader: BufferedReader, _writ
    * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   def handleCommand: Unit = {
     logger.info(pid + " Transaction phase, waiting for commands")
-    txPF(readCommand)
+    transactionPF(readCommand)
   }
 
-  def txPF: PartialFunction[Pop3Command, Unit] =
+  def transactionPF: PartialFunction[Pop3Command, Unit] = LangUtils.combine(handleStat,
     List(
-      //readList,
-      //readRetr,
-      //readDele,
-      readNoop,
-      //readRset,
-      readTop,
-      //readUidl,
-      readQuit,
-      readUnsupported)
-            .foldLeft(readStat)((acc, x) => acc.orElse(x))
+      //handleList,
+      //handleRetr,
+      //handleDele,
+      handleNoop,
+      //handleRset,
+      handleTop,
+      //handleUidl,
+      handleQuit,
+      handleUnsupported))
 
-  def readStat: PartialFunction[Pop3Command, Unit] = {
+  def handleStat: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(STAT, _) =>
       writeOk(mailbox.getNumberOfMessage + " " + mailbox.getSizeOfAllMessage);
   }
 
-  def readList: PartialFunction[Pop3Command, Unit] = {
+  def handleList: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(LIST, _) =>
   }
 
-  def readRetr: PartialFunction[Pop3Command, Unit] = {
+  def handleRetr: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(RETR, _) =>
   }
 
-  def readDele: PartialFunction[Pop3Command, Unit] = {
+  def handleDele: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(DELE, _) =>
   }
 
-  def readNoop: PartialFunction[Pop3Command, Unit] = {
+  def handleNoop: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(NOOP, _) => writeOk
   }
 
-  def readRset: PartialFunction[Pop3Command, Unit] = {
+  def handleRset: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(RSET, _) =>
   }
 
-  val topPattern = """([0-9]+) ([0-9]+)""".r
-  def readTop: PartialFunction[Pop3Command, Unit] = {
-    case Pop3Command(TOP, args) =>
-      args match {
-        case topPattern(msgIdStr, nbLinesStr) =>
-            val msgid = Integer.parseInt(msgIdStr)
-            val nbLines = Integer.parseInt(nbLinesStr)
-            mailbox.getMessage(msgid) match {
-              case None => writeErr("Message not found")
-              case file:File =>
-                writeOk
-                val lines = IOUtils.readLines(new FileInputStream(file), encoding)
+  val idAndLinePattern = """([0-9]+) ([0-9]+)""".r
 
-            }
+  def handleTop: PartialFunction[Pop3Command, Unit] = {
+    case Pop3Command(TOP, Some(idAndLinePattern(msgIdStr, nbLinesStr))) =>
+      val msgid = Integer.parseInt(msgIdStr)
+      val nbLines = Integer.parseInt(nbLinesStr)
+      mailbox.getMessage(msgid) match {
+        case None => writeErr("Message not found")
+        case Some(msg) =>
+          writeOk
+          val content = new BufferedReader(new InputStreamReader(new FileInputStream(msg.file), encoding))
 
-        case _ => writeErr("Invalid argument for top requires: msgid and line numbers")
+          // initial potential empty lines
+          var line: String = content.readLine
+          while (line != null && line.length == 0) {
+            write(line)
+            line = content.readLine
+          }
+
+          // write headers
+          while (line != null && line.length > 0) {
+            write(line)
+            line = content.readLine
+          }
+
+          // empty lines separating header from body
+          while (line != null && line.length == 0) {
+            write(line)
+            line = content.readLine
+          }
+
+          // write the TOP nbLines of the body
+          var remaining = nbLines
+          while (line != null && remaining > 0) {
+            write(line)
+            remaining = remaining - 1
+            line = content.readLine
+          }
+
+          write(".")
       }
+    case Pop3Command(TOP, arg) =>
+      writeErr("Invalid argument for " + TOP + " requires msgid and line numbers as numeric values; got: " + arg)
   }
 
   val encoding = "iso-8859-1"
 
-  def readUidl: PartialFunction[Pop3Command, Unit] = {
+  def handleUidl: PartialFunction[Pop3Command, Unit] = {
     case Pop3Command(UIDL, _) =>
   }
 }

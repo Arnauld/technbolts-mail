@@ -1,6 +1,6 @@
 package org.technbolts.mail.pop3
 
-object Pop3Commands {
+object Pop3Command {
   val QUIT = "QUIT";
   val USER = "USER";
   val PASS = "PASS";
