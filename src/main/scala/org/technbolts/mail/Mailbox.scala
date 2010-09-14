@@ -23,6 +23,14 @@ class Message(val file:File) {
       file.delete
   }
 
+  def uniqueId:String = {
+    val msgid = "message-id: "
+    headers.find( _.toLowerCase.startsWith(msgid) ) match {
+      case None => file.getName
+      case Some(line) => line.substring(msgid.length)
+    }
+  }
+
   def headers:List[String] = {
     val lines = new ListBuffer[String] ()
     val writer = (s:String)=> { lines.append(s) }
@@ -127,10 +135,10 @@ class Mailbox(user:User, rootDir:File) {
 
   def getMessage(idx:Int):Option[Message] = {
     val msgs = messages
-    if(idx<msgs.size)
-      Some(msgs(idx))
-    else
-      None
+    idx match {
+      case x if(x >= 0 && x < msgs.size) => Some(msgs(idx))
+      case _ => None
+    }
   }
 
   def processDeleted:Unit = messages.filter( _.isDeleted ).foreach( _.deleteFile )
