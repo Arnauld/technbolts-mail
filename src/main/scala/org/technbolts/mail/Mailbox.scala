@@ -95,8 +95,14 @@ object MailboxRepository {
   }
 }
 
+trait MailboxListener {
+  def onCreation(mailbox:Mailbox):Unit = {}
+}
+
 class MailboxRepository(rootDir:File) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[MailboxRepository])
+
+  val listeners = new ListBuffer[MailboxListener]
 
   private val locked = new HashSet[String]
   def acquireMailbox(user:User)(pf:PartialFunction[Option[Mailbox],Unit]):Unit = {
@@ -105,7 +111,9 @@ class MailboxRepository(rootDir:File) {
             locked.add(user.login) match {
               case true =>
                 logger.info("Mailbox <{}> locked", user.login)
-                Some(new Mailbox (user, rootDir))
+                val mbox = new Mailbox (user, rootDir)
+                listeners.foreach( _.onCreation(mbox) )
+                Some(mbox)
               case false =>
                 logger.warn("Mailbox <{}> already locked", user.login)
                 None
@@ -122,6 +130,8 @@ class MailboxRepository(rootDir:File) {
 }
 
 class Mailbox(user:User, rootDir:File) {
+
+  var ignoreDelete:Boolean = false
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[Mailbox])
 
@@ -152,5 +162,5 @@ class Mailbox(user:User, rootDir:File) {
     }
   }
 
-  def processDeleted:Unit = messages.filter( _.isDeleted ).foreach( _.deleteFile )
+  def processDeleted:Unit = if(!ignoreDelete) messages.filter( _.isDeleted ).foreach( _.deleteFile )
 }

@@ -17,7 +17,7 @@ object Pop3Server {
   def apply(port: Int, mailboxRepository: MailboxRepository): Pop3Server = new Pop3Server(port, mailboxRepository)
 }
 
-class Pop3Server(port: Int, mailboxRepository: MailboxRepository) {
+class Pop3Server(val port: Int, val mailboxRepository: MailboxRepository) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[Pop3Server])
 
   logger.info("POP3 Server starting on port <" + port + ">")
