@@ -87,7 +87,6 @@ class Message(val file:File) {
     }
   }
 
-  def uniqueId:String = ""
 }
 
 object MailboxRepository {

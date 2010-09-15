@@ -92,12 +92,9 @@ class Pop3ServerState(val mailboxRepository: MailboxRepository) {
 
 class Pop3Session(val pid: String,
                   val serverState:Pop3ServerState,
-                  _reader: BufferedReader,
-                  _writer: BufferedWriter,
+                  val reader: BufferedReader,
+                  val writer: BufferedWriter,
                   val onExit: () => Unit) extends ProtocolSupport with Runnable {
-
-  def reader = _reader
-  def writer = _writer
 
   import Pop3Command._
 
@@ -232,6 +229,9 @@ class Pop3Session(val pid: String,
    * </pre>
    */
   def handleQuit: PartialFunction[Pop3Command, Unit] = {
+    case Pop3Command(NULL, _) =>
+      //consider it is a disconnection
+      throw new QuitException
     case Pop3Command(QUIT, _) =>
       /*
        * When the client issues the QUIT command from the TRANSACTION state,

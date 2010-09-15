@@ -146,8 +146,10 @@ class SmtpSession(val pid: String,
   }
 
   def handleEhlo: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(EHLO, argument) =>
+    case SmtpCommand(EHLO, Some(argument)) =>
       write("250 Hello "+argument)
+    case SmtpCommand(EHLO, _) =>
+      write("250 Hello anonymous!")
   }
 
   def handleNoop:PartialFunction[SmtpCommand, Unit] = {

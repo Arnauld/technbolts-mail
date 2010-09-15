@@ -61,7 +61,10 @@ trait ProtocolSupport {
    * Reads a line from the input stream and returns it.
    */
   def readLine: String = {
-    val line = reader.readLine().trim();
+    val line = reader.readLine match {
+      case null => Pop3Command.NULL
+      case read => read.trim
+    }
     logger.debug("Reading Input: {}", line)
     line;
   }
