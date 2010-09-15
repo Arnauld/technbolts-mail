@@ -3,6 +3,7 @@ package org.technbolts.mail
 import org.slf4j.{Logger, LoggerFactory}
 import java.io._
 import collection.mutable.{ListBuffer, HashSet}
+import org.apache.commons.io.IOUtils
 
 class Message(val file:File) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[Message])
@@ -18,9 +19,12 @@ class Message(val file:File) {
   def undelete:Unit = deleted=false
   def isDeleted = deleted
 
-  def deleteFile:Unit = {
-    if(file.exists)
-      file.delete
+  def deleteFile:Unit = file.exists match {
+      case true => file.delete match {
+        case false => logger.warn("Failed to delete <" + file.getAbsolutePath + ">")
+        case true => logger.debug("File <" + file.getAbsolutePath + "> deleted!")
+      }
+      case false => logger.warn("Nothing to delete <" + file.getAbsolutePath + ">")
   }
 
   def headers:List[String] = {
@@ -39,35 +43,43 @@ class Message(val file:File) {
   }
 
   def writeTo(writer:(String)=>Unit, nbLines:Option[Int]):Unit = {
-    val content = new BufferedReader(new InputStreamReader(new FileInputStream(file), encoding))
+    val inputStream: FileInputStream = new FileInputStream(file)
+    try {
+      val content = new BufferedReader(new InputStreamReader(inputStream, encoding))
 
-    // initial potential empty lines
-    var line: String = content.readLine
-    while (line != null && line.length == 0) {
-      writer(line)
-      line = content.readLine
+      // initial potential empty lines
+      var line: String = content.readLine
+      while (line != null && line.length == 0) {
+        writer(line)
+        line = content.readLine
+      }
+
+      // write headers
+      while (line != null && line.length > 0) {
+        writer(line)
+        line = content.readLine
+      }
+
+      // empty lines separating header from body
+      while (line != null && line.length == 0) {
+        writer(line)
+        line = content.readLine
+      }
+
+      // write the TOP nbLines of the body
+      var remaining = nbLines.getOrElse(Integer.MAX_VALUE)
+      while (line != null && remaining > 0) {
+        writer(line)
+        remaining = remaining - 1
+        line = content.readLine
+      }
     }
-
-    // write headers
-    while (line != null && line.length > 0) {
-      writer(line)
-      line = content.readLine
-    }
-
-    // empty lines separating header from body
-    while (line != null && line.length == 0) {
-      writer(line)
-      line = content.readLine
-    }
-
-    // write the TOP nbLines of the body
-    var remaining = nbLines.getOrElse(Integer.MAX_VALUE)
-    while (line != null && remaining > 0) {
-      writer(line)
-      remaining = remaining - 1
-      line = content.readLine
+    finally{
+      IOUtils.closeQuietly(inputStream)
     }
   }
+
+  def uniqueId:String = ""
 }
 
 object MailboxRepository {
