@@ -1,10 +1,10 @@
 package org.technbolts.mail.pop3
 
-import java.io.{PrintWriter, BufferedReader}
+import java.io.{BufferedWriter, PrintWriter, BufferedReader}
 
 trait ProtocolSupport {
   def reader: BufferedReader
-  def writer: PrintWriter
+  def writer: BufferedWriter
   
   //
   val CRLF = "\r\n"
@@ -20,9 +20,9 @@ trait ProtocolSupport {
    */
   def writeErr(message: String): Unit = {
     logger.debug("Writing ERR: {}", message)
-    writer.print("-ERR ")
-    writer.print(message)
-    writer.print(CRLF);
+    writer.write("-ERR ")
+    writer.write(message)
+    writer.write(CRLF);
     writer.flush();
   }
 
@@ -31,9 +31,9 @@ trait ProtocolSupport {
    */
   def writeOk(message: String): Unit = {
     logger.debug("Writing OK: {}", message)
-    writer.print("+OK ")
-    writer.print(message)
-    writer.print(CRLF);
+    writer.write("+OK ")
+    writer.write(message)
+    writer.write(CRLF);
     writer.flush();
   }
 
@@ -42,8 +42,8 @@ trait ProtocolSupport {
    */
   def writeOk(): Unit = {
     logger.debug("Writing OK")
-    writer.print("+OK ")
-    writer.print(CRLF);
+    writer.write("+OK ")
+    writer.write(CRLF);
     writer.flush();
   }
 
@@ -52,8 +52,8 @@ trait ProtocolSupport {
    */
   def write(message: String): Unit = {
     logger.debug("Writing Output: {}", message)
-    writer.print(message)
-    writer.print(CRLF);
+    writer.write(message)
+    writer.write(CRLF);
     writer.flush();
   }
 
