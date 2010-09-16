@@ -6,10 +6,11 @@ object SmtpCommand {
 
   val QUIT = "QUIT"
   val EHLO = "EHLO"
+  val HELO = "HELO"
   val RSET = "RSET"
   val NOOP = "NOOP"
-  val MAIL = "MAIL"
-  val RCPT = "RCPT"
+  val MAIL = "MAIL FROM:"
+  val RCPT = "RCPT TO:"
   val DATA = "DATA"
 }
 

@@ -3,10 +3,9 @@ package org.technbolts.mail.smtp
 import org.slf4j.{Logger, LoggerFactory}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.io._
-import org.technbolts.util.LangUtils
 import org.technbolts.mail.MailboxRepository
-import java.net.{Socket, SocketTimeoutException, ServerSocket}
-import collection.mutable.ListBuffer
+import java.net.{SocketTimeoutException, ServerSocket}
+import org.technbolts.util.{EventDispatcher, LangUtils}
 
 object SmtpServer {
   def apply(): SmtpServer = apply(25)
@@ -18,19 +17,11 @@ object SmtpServer {
   def apply(port: Int, mailboxRepository: MailboxRepository): SmtpServer = new SmtpServer(port, mailboxRepository)
 }
 
-trait SmtpServerListener {
-  def onStart(server: SmtpServer): Unit = {}
-
-  def onSocketAccepted(server: SmtpServer, socket: Socket): Unit = {}
-
-  def onStop(server: SmtpServer): Unit = {}
-}
-
 class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpServer])
 
   logger.info("Smtp Server starting on port <" + port + ">")
-  val listeners = new ListBuffer[SmtpServerListener]
+  val listeners = new EventDispatcher[SmtpEvent]
 
   val serverState = new SmtpServerState(mailboxRepository)
 
@@ -43,11 +34,11 @@ class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
 
     logger.info("Smtp Server running on port <" + port + "> waiting for connection")
     try {
-      listeners.foreach(_.onStart(this))
+      listeners.publishEvent(OnSmtpServerStart(this))
       doLoop(serverSocket)
     }
     finally {
-      listeners.foreach(_.onStop(this))
+      listeners.publishEvent(OnSmtpServerStop(this))
     }
   }
 
@@ -57,7 +48,7 @@ class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
     while (serverState.isRunning) {
       try {
         val socket = serverSocket.accept
-        listeners.foreach(_.onSocketAccepted(this, socket))
+        listeners.publishEvent(OnSmtpSessionPreInit(this, socket))
 
         /**remote identity */
         val remoteAddress = socket.getInetAddress();
@@ -88,9 +79,7 @@ class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
         case e => throw e //rethrow it
       }
     }
-
   }
-
 
   def stop: Unit = {
     serverState.stop
@@ -180,10 +169,21 @@ class SmtpSession(val pid: String,
       throw new QuitException
   }
 
+  /**
+   * <pre>
+   *   These commands are used to identify the SMTP client to the SMTP
+   *   server.  The argument clause contains the fully-qualified domain name
+   *   of the SMTP client, if one is available. 
+   * </pre>
+   */
   def handleEhlo: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(EHLO, Some(argument)) =>
       write("250 Hello " + argument)
     case SmtpCommand(EHLO, _) =>
+      write("250 Hello anonymous!")
+    case SmtpCommand(HELO, Some(argument)) =>
+      write("250 Hello " + argument)
+    case SmtpCommand(HELO, _) =>
       write("250 Hello anonymous!")
   }
 
@@ -196,8 +196,111 @@ class SmtpSession(val pid: String,
     case SmtpCommand(RSET, argument) =>
   }
 
+  /**
+   * <pre>
+   * This command is used to initiate a mail transaction in which the mail
+   * data is delivered to an SMTP server that may, in turn, deliver it to
+   * one or more mailboxes or pass it on to another system (possibly using
+   * SMTP).  The argument clause contains a reverse-path and may contain
+   * optional parameters.  In general, the MAIL command may be sent only
+   * when no mail transaction is in progress, see Section 4.1.4.
+   *
+   * The reverse-path consists of the sender mailbox.  Historically, that
+   * mailbox might optionally have been preceded by a list of hosts, but
+   * that behavior is now deprecated (see Appendix C).  In some types of
+   * reporting messages for which a reply is likely to cause a mail loop
+   * (for example, mail delivery and non-delivery notifications), the
+   * reverse-path may be null (see Section 3.6).
+   *
+   * This command clears the reverse-path buffer, the forward-path buffer,
+   * and the mail data buffer, and it inserts the reverse-path information
+   * from its argument clause into the reverse-path buffer.
+   *
+   * If service extensions were negotiated, the MAIL command may also
+   * carry parameters associated with a particular service extension.
+   *
+   * Syntax:
+   *
+   * mail = "MAIL FROM:" Reverse-path
+   *                                    [SP Mail-parameters] CRLF
+   * </pre>
+   */
   def handleMail: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(MAIL, argument) =>
+  }
+
+
+  /**
+   * <pre>
+   * This command is used to identify an individual recipient of the mail
+   * data; multiple recipients are specified by multiple uses of this
+   * command.  The argument clause contains a forward-path and may contain
+   * optional parameters.
+   *
+   * The forward-path normally consists of the required destination
+   * mailbox.  Sending systems SHOULD NOT generate the optional list of
+   * hosts known as a source route.  Receiving systems MUST recognize
+   * source route syntax but SHOULD strip off the source route
+   * specification and utilize the domain name associated with the mailbox
+   * as if the source route had not been provided.
+   *
+   * Similarly, relay hosts SHOULD strip or ignore source routes, and
+   * names MUST NOT be copied into the reverse-path.  When mail reaches
+   * its ultimate destination (the forward-path contains only a
+   * destination mailbox), the SMTP server inserts it into the destination
+   * mailbox in accordance with its host mail conventions.
+   *
+   * This command appends its forward-path argument to the forward-path
+   * buffer; it does not change the reverse-path buffer nor the mail data
+   * buffer.
+   *
+   * For example, mail received at relay host xyz.com with envelope
+   * commands
+   *
+   *    MAIL FROM:<userx@y.foo.org>
+   *    RCPT TO:<@hosta.int,@jkl.org:userc@d.bar.org>
+   *
+   * will normally be sent directly on to host d.bar.org with envelope
+   * commands
+   *
+   *    MAIL FROM:<userx@y.foo.org>
+   *    RCPT TO:<userc@d.bar.org>
+   *
+   * As provided in Appendix C, xyz.com MAY also choose to relay the
+   * message to hosta.int, using the envelope commands
+   *
+   *    MAIL FROM:<userx@y.foo.org>
+   *    RCPT TO:<@hosta.int,@jkl.org:userc@d.bar.org>
+   *
+   *
+   * or to jkl.org, using the envelope commands
+   *
+   *    MAIL FROM:<userx@y.foo.org>
+   *    RCPT TO:<@jkl.org:userc@d.bar.org>
+   *
+   * Attempting to use relaying this way is now strongly discouraged.
+   * Since hosts are not required to relay mail at all, xyz.com MAY also
+   * reject the message entirely when the RCPT command is received, using
+   * a 550 code (since this is a "policy reason").
+   *
+   * If service extensions were negotiated, the RCPT command may also
+   * carry parameters associated with a particular service extension
+   * offered by the server.  The client MUST NOT transmit parameters other
+   * than those associated with a service extension offered by the server
+   * in its EHLO response.
+   *
+   * Syntax:
+   *
+   *    rcpt = "RCPT TO:" ( "<Postmaster@" Domain ">" / "<Postmaster>" /
+   *                Forward-path ) [SP Rcpt-parameters] CRLF
+   *
+   *           Note that, in a departure from the usual rules for
+   *                local-parts, the "Postmaster" string shown above is
+   *                treated as case-insensitive.
+   * </pre>
+   */
+  def handleRcpt: PartialFunction[SmtpCommand, Unit] = {
+    case SmtpCommand(RCPT, argument) =>
   }
 
   def handleData: PartialFunction[SmtpCommand, Unit] = {

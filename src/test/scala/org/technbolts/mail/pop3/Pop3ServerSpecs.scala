@@ -4,21 +4,24 @@ import org.specs.Specification
 import java.io._
 import org.mockito.Mockito
 import java.util.Properties
-import javax.mail.{Message, Folder, Session}
-import org.technbolts.mail.{MailboxListener, MailboxRepository, Mailbox, User}
 import java.util.concurrent.CyclicBarrier
 import collection.JavaConversions
+import org.technbolts.TestSettings
+import javax.mail.{Header, Message, Folder, Session}
+import org.technbolts.mail._
 
 object Env {
+  def settings = TestSettings()
+
   def startServer(port:Int):Pop3Server = {
-    val server = Pop3Server(port, new File("E:\\Arnauld\\mailboxes"))
-    server.mailboxRepository.listeners.append( new MailboxListener {
-      override def onCreation(mbox:Mailbox):Unit = mbox.ignoreDelete = true
-    })
+    val server = Pop3Server(port, settings.workingDir)
+    server.mailboxRepository.listeners++{
+      case OnMailboxLoaded(mailbox) => mailbox.doDelete = (m)=>{}
+    }
     val barrier = new CyclicBarrier (2)
-    server.listeners.append(new Pop3ServerListener {
-      override def onStart(server:Pop3Server):Unit = barrier.await
-    })
+    server.listeners++{
+      case OnPop3ServerStart(server) => barrier.await
+    }
 
     // start server in a separate thread
     new Thread(new Runnable {
@@ -52,7 +55,14 @@ class Pop3ServerSpecs extends Specification {
         val bous = new ByteArrayOutputStream
         m.writeTo(bous)
         println(i + ": " + m.getAllRecipients + "\t" + m.getSubject())
-        JavaConversions.asIterator(m.getAllHeaders).foreach( println _ )
+
+        val writeHeaders = false
+        if(writeHeaders) {
+          JavaConversions.asIterator(m.getAllHeaders).foreach( (header:Any) => {
+            val h = header.asInstanceOf[Header]
+            println(h.getName+"->"+h.getValue+", ")
+          })
+        }
         i = i + 1
       })
 

@@ -21,8 +21,8 @@ trait ProtocolSupport {
   def write(message: String): Unit = {
     logger.debug("Writing Output: {}", message)
     writer.write(message)
-    writer.write(CRLF);
-    writer.flush();
+    writer.write(CRLF)
+    writer.flush()
   }
 
   /**
@@ -34,15 +34,25 @@ trait ProtocolSupport {
       case read => read.trim
     }
     logger.debug("Reading Input: {}", line)
-    line;
+    line
   }
 
   def readCommand: SmtpCommand = {
     val line = readLine
-    val command = line.indexOf(" ") match {
-      case indexOf if indexOf > -1 => SmtpCommand(line.substring(0, indexOf), Some(line.substring(indexOf + 1)))
-      case _ => SmtpCommand(line, None)
-    }
+    val command =
+      // special case of the two words commands
+      if(line.startsWith(SmtpCommand.MAIL)) {
+        SmtpCommand(SmtpCommand.MAIL, Some(line.substring(SmtpCommand.MAIL.length)))
+      }
+      else if(line.startsWith(SmtpCommand.RCPT)) {
+        SmtpCommand(SmtpCommand.RCPT, Some(line.substring(SmtpCommand.RCPT.length)))
+      }
+      else line.indexOf(" ") match {
+        case indexOf if indexOf > -1 =>
+          SmtpCommand(line.substring(0, indexOf), Some(line.substring(indexOf + 1)))
+        case _ =>
+          SmtpCommand(line, None)
+      }
     logger.info("Received: {}", command)
     command
   }
