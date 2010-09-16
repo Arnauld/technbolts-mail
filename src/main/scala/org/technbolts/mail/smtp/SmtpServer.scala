@@ -6,6 +6,7 @@ import java.io._
 import org.technbolts.mail.MailboxRepository
 import java.net.{SocketTimeoutException, ServerSocket}
 import org.technbolts.util.{EventDispatcher, LangUtils}
+import collection.mutable.ListBuffer
 
 object SmtpServer {
   def apply(): SmtpServer = apply(25)
@@ -91,6 +92,8 @@ class SmtpServerState(val mailboxRepository: MailboxRepository) {
 
   val running = new AtomicBoolean(true)
 
+  var domain = "127.0.0.1"
+
   def isRunning = running.get
 
   def stop: Unit = {
@@ -108,14 +111,58 @@ class SmtpServerState(val mailboxRepository: MailboxRepository) {
   }
 }
 
+class SmtpTx {
+  val sMail = 1
+  val sRcpt = 2
+  val sData = 3
+
+  private var mail: Option[String] = None
+  private var recipients: List[String] = Nil
+  private val data = ListBuffer[String]()
+  private var state = sMail
+
+  def mail(mail:String):SmtpTx = {
+    this.mail = Some(mail)
+    this.state = sRcpt
+    this
+  }
+
+  def rcpt(rcpt: String):SmtpTx = {
+    recipients = rcpt :: recipients
+    this
+  }
+
+  def dataReceived:SmtpTx = {
+    this.state = sData
+    this
+  }
+
+  def data(data: String):SmtpTx = {
+    this.data.append(data)
+    this
+  }
+
+  def acceptMail = (state==sMail)
+  def acceptRcpt = (state==sRcpt)
+  def acceptData = (state==sRcpt || state==sData)
+
+}
+
+object SmtpSession {
+  val recipientPattern = """<([^ ]+)>[ ]?(.*)""".r
+}
+
 class SmtpSession(val pid: String,
                   val reader: BufferedReader,
                   val writer: BufferedWriter,
                   val serverState: SmtpServerState,
                   val onExit: () => Unit) extends ProtocolSupport with Runnable {
   import SmtpCommand._
+  import SmtpSession._
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpSession])
+
+  var transaction = new SmtpTx
 
   def run: Unit = {
     try {
@@ -125,21 +172,23 @@ class SmtpSession(val pid: String,
       val firstCommand = readCommand
       (serverState.handleServerCommands orElse doSmtpLoop)(firstCommand)
 
-    } catch {
+    }
+    catch {
       case q: QuitException =>
         logger.info("Quit asked, bye!")
       case e: Exception => logger.error("Humpf: " + e.getMessage, e)
-    } finally {
+    }
+    finally {
       onExit()
     }
   }
 
   lazy val smtpPF: PartialFunction[SmtpCommand, Unit] = LangUtils.combine(handleEhlo).orElse(
     handleNoop,
-    //handleRset,
-    //handleMail,
-    //handleRcpt,
-    //handleData,
+    handleRset,
+    handleMail,
+    handleRcpt,
+    handleData,
     handleQuit,
     handleUnsupported).get
 
@@ -159,7 +208,8 @@ class SmtpSession(val pid: String,
    * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   def handleUnsupported: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(command, _) => throw new UnsupportedCommandException("Unsupported command: " + command)
+    case SmtpCommand(command, _) =>
+      write("500 Command Unrecognized: " + command)
   }
 
   def handleQuit: PartialFunction[SmtpCommand, Unit] = {
@@ -177,23 +227,25 @@ class SmtpSession(val pid: String,
    * </pre>
    */
   def handleEhlo: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(EHLO, Some(argument)) =>
-      write("250 Hello " + argument)
-    case SmtpCommand(EHLO, _) =>
-      write("250 Hello anonymous!")
-    case SmtpCommand(HELO, Some(argument)) =>
-      write("250 Hello " + argument)
-    case SmtpCommand(HELO, _) =>
-      write("250 Hello anonymous!")
+    case SmtpCommand(EHLO, Some(argument)) => helloResponse(argument)
+    case SmtpCommand(EHLO, _) => helloResponse("anonymous?")
+    case SmtpCommand(HELO, Some(argument)) => helloResponse(argument)
+    case SmtpCommand(HELO, _) => helloResponse("anonymous?")
+  }
+
+  var helloResponse:(String)=>Unit = (client:String) => {
+    write("250 " + serverState.domain + " Greeting " + client + "!")
   }
 
   def handleNoop: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(NOOP, _) =>
-      write("250 OK")
+      writeOk
   }
 
   def handleRset: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(RSET, argument) =>
+      transaction = new SmtpTx
+      writeOk
   }
 
   /**
@@ -226,9 +278,14 @@ class SmtpSession(val pid: String,
    * </pre>
    */
   def handleMail: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(MAIL, argument) =>
+    case SmtpCommand(MAIL, Some(recipientPattern(mail, extra))) =>
+      if(transaction.acceptMail) {
+        transaction.mail(mail)
+        writeOk
+      }
+      else
+        writeBadSequence
   }
-
 
   /**
    * <pre>
@@ -300,10 +357,28 @@ class SmtpSession(val pid: String,
    * </pre>
    */
   def handleRcpt: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(RCPT, argument) =>
+    case SmtpCommand(RCPT, Some(recipientPattern(mail, extra))) =>
+      if(transaction.acceptRcpt) {
+        transaction.rcpt(mail)
+        writeOk
+      }
+      else
+        writeBadSequence
   }
 
   def handleData: PartialFunction[SmtpCommand, Unit] = {
-    case SmtpCommand(DATA, argument) =>
+    case SmtpCommand(DATA, _) =>
+      if(transaction.acceptData) {
+        transaction.dataReceived
+        write("354 Start mail input; end with <CRLF>.<CRLF>")
+        var line = readLine
+        while(line!=null && line!=".") {
+          //println(line)
+          line = readLine
+        }
+        writeOk
+      }
+      else
+        writeBadSequence
   }
 }

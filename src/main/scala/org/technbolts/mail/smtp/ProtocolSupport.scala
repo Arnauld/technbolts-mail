@@ -25,6 +25,10 @@ trait ProtocolSupport {
     writer.flush()
   }
 
+  def writeBadSequence:Unit = write("503 Bad sequence of commands")
+  
+  def writeOk:Unit = write("250 OK")
+
   /**
    * Reads a line from the input stream and returns it.
    */

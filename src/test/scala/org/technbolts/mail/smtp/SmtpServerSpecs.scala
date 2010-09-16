@@ -36,11 +36,14 @@ object Env {
 }
 
 class SmtpServerSpecs extends Specification {
-  "SmtpServer" should {
-    "handle new connection from javamail" in {
-      val port = 26
-      val server = Env.startServer(port)
+  val port = 26
+  var server:SmtpServer = _
 
+  "SmtpServer" should {
+    doFirst {
+      server = Env.startServer(port)
+    }
+    "handle new connection from javamail" in {
       val sender = new JavaMailSenderImpl
       sender.setHost("127.0.0.1")
       sender.setPort(port)
@@ -49,9 +52,30 @@ class SmtpServerSpecs extends Specification {
       val helper = new MimeMessageHelper(message)
       helper.setTo("test@host.com")
       helper.setText("Thank you for ordering!")
-
       sender.send(message)
+    }
+    doLast {
       server.stop
+    }
+  }
+}
+
+class SmtpSessionSpecs extends Specification {
+  "Mail pattern matching" should {
+    "handle basic input" in {
+      val found = "<yeah@Technbolts>" match {
+        case SmtpSession.recipientPattern(mail,extra) => mail
+        case _ => "<no-match>"
+      } 
+      found must_== "yeah@Technbolts"
+    }
+    "handle input with arguments" in {
+      val (ef,ex) = "<yeah@Technbolts> bob" match {
+        case SmtpSession.recipientPattern(mail,extra) => (mail,extra)
+        case _ => "<no-match>"
+      }
+      ef must_== "yeah@Technbolts"
+      ex must_== "bob"
     }
   }
 }
