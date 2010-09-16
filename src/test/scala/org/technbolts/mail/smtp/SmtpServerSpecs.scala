@@ -5,21 +5,24 @@ import java.io._
 import org.mockito.Mockito
 import java.util.Properties
 import javax.mail.{Message, Folder, Session}
-import org.technbolts.mail.{MailboxListener, MailboxRepository, Mailbox, User}
 import java.util.concurrent.CyclicBarrier
 import collection.JavaConversions
 import org.springframework.mail.javamail.{MimeMessageHelper, JavaMailSenderImpl}
+import org.technbolts.TestSettings
+import org.technbolts.mail.{OnMailboxLoaded, MailboxRepository, Mailbox, User}
 
 object Env {
+  def settings = TestSettings()
+
   def startServer(port: Int): SmtpServer = {
-    val server = SmtpServer(port, new File("E:\\Arnauld\\mailboxes"))
-    server.mailboxRepository.listeners.append(new MailboxListener {
-      override def onCreation(mbox: Mailbox): Unit = mbox.ignoreDelete = true
-    })
+    val server = SmtpServer(port, settings.workingDir)
+    server.mailboxRepository.listeners++ {
+      case OnMailboxLoaded(mbox: Mailbox) => mbox.doDelete = (m)=> {}
+    }
     val barrier = new CyclicBarrier(2)
-    server.listeners.append(new SmtpServerListener {
-      override def onStart(server: SmtpServer): Unit = barrier.await
-    })
+    server.listeners ++ {
+      case OnSmtpServerStart(server) =>  barrier.await
+    }
 
     // start server in a separate thread
     new Thread(new Runnable {

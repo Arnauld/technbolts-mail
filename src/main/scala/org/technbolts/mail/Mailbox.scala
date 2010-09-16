@@ -4,6 +4,7 @@ import org.slf4j.{Logger, LoggerFactory}
 import java.io._
 import collection.mutable.{ListBuffer, HashSet}
 import org.apache.commons.io.IOUtils
+import org.technbolts.util.EventDispatcher
 
 class Message(val file:File) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[Message])
@@ -95,14 +96,13 @@ object MailboxRepository {
   }
 }
 
-trait MailboxListener {
-  def onCreation(mailbox:Mailbox):Unit = {}
-}
+sealed abstract class MailboxEvent(mailbox: Mailbox)
+case class OnMailboxLoaded(mailbox: Mailbox) extends MailboxEvent(mailbox)
 
 class MailboxRepository(rootDir:File) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[MailboxRepository])
 
-  val listeners = new ListBuffer[MailboxListener]
+  val listeners = new EventDispatcher[MailboxEvent]
 
   private val locked = new HashSet[String]
   def acquireMailbox(user:User)(pf:PartialFunction[Option[Mailbox],Unit]):Unit = {
@@ -112,7 +112,7 @@ class MailboxRepository(rootDir:File) {
               case true =>
                 logger.info("Mailbox <{}> locked", user.login)
                 val mbox = new Mailbox (user, rootDir)
-                listeners.foreach( _.onCreation(mbox) )
+                listeners.publishEvent(OnMailboxLoaded(mbox))
                 Some(mbox)
               case false =>
                 logger.warn("Mailbox <{}> already locked", user.login)
@@ -131,7 +131,7 @@ class MailboxRepository(rootDir:File) {
 
 class Mailbox(user:User, rootDir:File) {
 
-  var ignoreDelete:Boolean = false
+  var doDelete:(Message)=>Unit = { _.deleteFile }
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[Mailbox])
 
@@ -162,5 +162,5 @@ class Mailbox(user:User, rootDir:File) {
     }
   }
 
-  def processDeleted:Unit = if(!ignoreDelete) messages.filter( _.isDeleted ).foreach( _.deleteFile )
+  def processDeleted:Unit = messages.filter( _.isDeleted ).foreach( (m)=> doDelete(m) )
 }
