@@ -1,36 +1,63 @@
 package org.technbolts.mail.smtp
 
-import java.net.{SocketTimeoutException, ServerSocket}
 import org.slf4j.{Logger, LoggerFactory}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.io._
 import org.technbolts.util.LangUtils
 import org.technbolts.mail.MailboxRepository
+import java.net.{Socket, SocketTimeoutException, ServerSocket}
+import collection.mutable.ListBuffer
+
 object SmtpServer {
-  def apply():SmtpServer = apply(25)
-  def apply(port: Int):SmtpServer = apply(port , new File("d:/data/mailboxes"))
-  def apply(port: Int, rootDir:File):SmtpServer = apply(port , new MailboxRepository(rootDir))
-  def apply(port: Int, mailboxRepository:MailboxRepository):SmtpServer = new SmtpServer(port, mailboxRepository)
+  def apply(): SmtpServer = apply(25)
+
+  def apply(port: Int): SmtpServer = apply(port, new File("d:/data/mailboxes"))
+
+  def apply(port: Int, rootDir: File): SmtpServer = apply(port, new MailboxRepository(rootDir))
+
+  def apply(port: Int, mailboxRepository: MailboxRepository): SmtpServer = new SmtpServer(port, mailboxRepository)
 }
 
-class SmtpServer(port: Int, mailboxRepository:MailboxRepository) {
+trait SmtpServerListener {
+  def onStart(server: SmtpServer): Unit = {}
+
+  def onSocketAccepted(server: SmtpServer, socket: Socket): Unit = {}
+
+  def onStop(server: SmtpServer): Unit = {}
+}
+
+class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpServer])
 
   logger.info("Smtp Server starting on port <" + port + ">")
-  val serverSocket = new ServerSocket(port)
+  val listeners = new ListBuffer[SmtpServerListener]
+
   val serverState = new SmtpServerState(mailboxRepository)
 
   def start: Unit = {
+    val serverSocket = new ServerSocket(port)
+
     // Set the socket to timeout every 10 seconds so it does not just block forever.
     // and will be aware of a stop notification
     serverSocket.setSoTimeout(1000)
 
+    logger.info("Smtp Server running on port <" + port + "> waiting for connection")
+    try {
+      listeners.foreach(_.onStart(this))
+      doLoop(serverSocket)
+    }
+    finally {
+      listeners.foreach(_.onStop(this))
+    }
+  }
+
+  private def doLoop(serverSocket: ServerSocket): Unit = {
     val idCounter = new AtomicInteger
 
-    logger.info("Smtp Server running on port <" + port + "> waiting for connection")
     while (serverState.isRunning) {
       try {
         val socket = serverSocket.accept
+        listeners.foreach(_.onSocketAccepted(this, socket))
 
         /**remote identity */
         val remoteAddress = socket.getInetAddress();
@@ -61,14 +88,22 @@ class SmtpServer(port: Int, mailboxRepository:MailboxRepository) {
         case e => throw e //rethrow it
       }
     }
+
+  }
+
+
+  def stop: Unit = {
+    serverState.stop
   }
 }
 
-class SmtpServerState(val mailboxRepository:MailboxRepository) {
+class SmtpServerState(val mailboxRepository: MailboxRepository) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpServerState])
 
   val running = new AtomicBoolean(true)
+
   def isRunning = running.get
+
   def stop: Unit = {
     logger.info("Stop required, bye!")
     running.set(false)
@@ -111,13 +146,13 @@ class SmtpSession(val pid: String,
   }
 
   lazy val smtpPF: PartialFunction[SmtpCommand, Unit] = LangUtils.combine(handleEhlo).orElse(
-      handleNoop,
-      //handleRset,
-      //handleMail,
-      //handleRcpt,
-      //handleData,
-      handleQuit,
-      handleUnsupported).get
+    handleNoop,
+    //handleRset,
+    //handleMail,
+    //handleRcpt,
+    //handleData,
+    handleQuit,
+    handleUnsupported).get
 
   def doSmtpLoop: PartialFunction[SmtpCommand, Unit] = {
     case command: SmtpCommand => {
@@ -147,12 +182,12 @@ class SmtpSession(val pid: String,
 
   def handleEhlo: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(EHLO, Some(argument)) =>
-      write("250 Hello "+argument)
+      write("250 Hello " + argument)
     case SmtpCommand(EHLO, _) =>
       write("250 Hello anonymous!")
   }
 
-  def handleNoop:PartialFunction[SmtpCommand, Unit] = {
+  def handleNoop: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(NOOP, _) =>
       write("250 OK")
   }

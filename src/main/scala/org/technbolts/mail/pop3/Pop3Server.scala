@@ -1,11 +1,12 @@
 package org.technbolts.mail.pop3
 
-import java.net.{SocketTimeoutException, ServerSocket}
 import org.slf4j.{Logger, LoggerFactory}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.io._
 import org.technbolts.util.LangUtils
 import org.technbolts.mail.{Message, MailboxRepository, Mailbox, User}
+import collection.mutable.ListBuffer
+import java.net.{Socket, SocketTimeoutException, ServerSocket}
 
 object Pop3Server {
   def apply(): Pop3Server = apply(110)
@@ -17,24 +18,42 @@ object Pop3Server {
   def apply(port: Int, mailboxRepository: MailboxRepository): Pop3Server = new Pop3Server(port, mailboxRepository)
 }
 
+trait Pop3ServerListener {
+  def onStart(server:Pop3Server):Unit = {}
+  def onSocketAccepted(server:Pop3Server, socket:Socket):Unit = {}
+  def onStop(server:Pop3Server):Unit = {}
+}
+
 class Pop3Server(val port: Int, val mailboxRepository: MailboxRepository) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[Pop3Server])
 
   logger.info("POP3 Server starting on port <" + port + ">")
-  val serverSocket = new ServerSocket(port)
   val state = new Pop3ServerState(mailboxRepository)
+  val listeners = new ListBuffer[Pop3ServerListener]
 
   def start: Unit = {
+    val serverSocket = new ServerSocket(port)
+
     // Set the socket to timeout every 10 seconds so it does not just block forever.
     // and will be aware of a stop notification
     serverSocket.setSoTimeout(1000)
 
-    val idCounter = new AtomicInteger
-
     logger.info("POP3 Server running on port <" + port + "> waiting for connection")
+    try{
+      listeners.foreach(_.onStart(this))
+      doLoop(serverSocket)
+    }
+    finally {
+      listeners.foreach(_.onStop(this))
+    }
+  }
+
+  private def doLoop(serverSocket:ServerSocket):Unit = {
+    val idCounter = new AtomicInteger
     while (state.isRunning) {
       try {
         val socket = serverSocket.accept
+        listeners.foreach(_.onSocketAccepted(this, socket))
 
         /**remote identity */
         val remoteAddress = socket.getInetAddress();
