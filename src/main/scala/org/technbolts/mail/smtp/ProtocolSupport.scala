@@ -43,21 +43,24 @@ trait ProtocolSupport {
 
   def readCommand: SmtpCommand = {
     val line = readLine
-    val command =
+    val command = stringToCommand(line)
+    logger.info("Received: {}", command)
+    command
+  }
+
+  implicit def stringToCommand(line:String): SmtpCommand = line match {
       // special case of the two words commands
-      if(line.startsWith(SmtpCommand.MAIL)) {
+      case x if line.startsWith(SmtpCommand.MAIL) =>
         SmtpCommand(SmtpCommand.MAIL, Some(line.substring(SmtpCommand.MAIL.length)))
-      }
-      else if(line.startsWith(SmtpCommand.RCPT)) {
+      case x if line.startsWith(SmtpCommand.RCPT) =>
         SmtpCommand(SmtpCommand.RCPT, Some(line.substring(SmtpCommand.RCPT.length)))
-      }
-      else line.indexOf(" ") match {
+      
+      // otherwise use space to extract command and parameters
+      case _ => line.indexOf(" ") match {
         case indexOf if indexOf > -1 =>
           SmtpCommand(line.substring(0, indexOf), Some(line.substring(indexOf + 1)))
         case _ =>
           SmtpCommand(line, None)
-      }
-    logger.info("Received: {}", command)
-    command
+        }
   }
 }

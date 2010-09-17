@@ -7,6 +7,8 @@ import org.technbolts.mail.MailboxRepository
 import java.net.{SocketTimeoutException, ServerSocket}
 import org.technbolts.util.{EventDispatcher, LangUtils}
 import collection.mutable.ListBuffer
+import org.technbolts.mail.store.ResourceRepository
+import org.apache.commons.io.{FileUtils, IOUtils}
 
 object SmtpServer {
   def apply(): SmtpServer = apply(25)
@@ -87,7 +89,12 @@ class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
   }
 }
 
-class SmtpServerState(val mailboxRepository: MailboxRepository) {
+trait SmtpContext {
+  def mailboxRepository: MailboxRepository
+  def resourceRepository: ResourceRepository
+}
+
+class SmtpServerState(val mailboxRepository: MailboxRepository) extends SmtpContext {
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpServerState])
 
   val running = new AtomicBoolean(true)
@@ -111,15 +118,16 @@ class SmtpServerState(val mailboxRepository: MailboxRepository) {
   }
 }
 
-class SmtpTx {
+class SmtpTx(context:SmtpContext) {
   val sMail = 1
   val sRcpt = 2
   val sData = 3
+  val sCommitted = 4
 
   private var mail: Option[String] = None
   private var recipients: List[String] = Nil
-  private val data = ListBuffer[String]()
   private var state = sMail
+  private val data = context.resourceRepository.temporaryResource
 
   def mail(mail:String):SmtpTx = {
     this.mail = Some(mail)
@@ -138,7 +146,7 @@ class SmtpTx {
   }
 
   def data(data: String):SmtpTx = {
-    this.data.append(data)
+    this.data.append(data.getBytes("iso-8859-1"))
     this
   }
 
@@ -146,6 +154,19 @@ class SmtpTx {
   def acceptRcpt = (state==sRcpt)
   def acceptData = (state==sRcpt || state==sData)
 
+  def commit:Unit = {
+    // prevent any further usage
+    state = sCommitted
+
+    val file = new File("D:\\temp\\w" + System.currentTimeMillis + ".eml")
+    val out = new FileOutputStream(file)
+    try{
+      data.copyTo(out)
+    }
+    finally{
+      IOUtils.closeQuietly(out)
+    }
+  }
 }
 
 object SmtpSession {
@@ -175,7 +196,9 @@ class SmtpSession(val pid: String,
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpSession])
 
-  var transaction = new SmtpTx
+  var transaction = createSmtpTx
+
+  def createSmtpTx:SmtpTx = new SmtpTx (serverState)
 
   def run: Unit = {
     try {
@@ -257,7 +280,7 @@ class SmtpSession(val pid: String,
 
   def handleRset: PartialFunction[SmtpCommand, Unit] = {
     case SmtpCommand(RSET, argument) =>
-      transaction = new SmtpTx
+      transaction = createSmtpTx
       writeOk
   }
 
@@ -386,9 +409,10 @@ class SmtpSession(val pid: String,
         write("354 Start mail input; end with <CRLF>.<CRLF>")
         var line = readLine
         while(line!=null && line!=".") {
-          //println(line)
+          transaction.data(line)
           line = readLine
         }
+        transaction.commit
         writeOk
       }
       else
