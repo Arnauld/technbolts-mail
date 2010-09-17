@@ -152,6 +152,19 @@ object SmtpSession {
   val recipientPattern = """<([^ ]+)>[ ]?(.*)""".r
 }
 
+/*
+
+Command	Reply Codes
+HELO or EHLO	250 500 501 503
+MAIL FROM	250 500 503
+RCPT TO	250 500 503
+DATA	354 451
+QUIT	221
+
+
+ */
+
+
 class SmtpSession(val pid: String,
                   val reader: BufferedReader,
                   val writer: BufferedWriter,
