@@ -7,7 +7,6 @@ import org.technbolts.mail.MailboxRepository
 import java.net.{SocketTimeoutException, ServerSocket}
 import org.technbolts.util.{EventDispatcher, LangUtils}
 import collection.mutable.ListBuffer
-import org.technbolts.mail.store.ResourceRepository
 import org.apache.commons.io.{FileUtils, IOUtils}
 
 object SmtpServer {
@@ -91,7 +90,8 @@ class SmtpServer(val port: Int, val mailboxRepository: MailboxRepository) {
 
 trait SmtpContext {
   def mailboxRepository: MailboxRepository
-  def resourceRepository: ResourceRepository
+  def temporaryMessage = mailboxRepository.temporaryMessage
+
 }
 
 class SmtpServerState(val mailboxRepository: MailboxRepository) extends SmtpContext {
@@ -127,7 +127,8 @@ class SmtpTx(context:SmtpContext) {
   private var mail: Option[String] = None
   private var recipients: List[String] = Nil
   private var state = sMail
-  private val data = context.resourceRepository.temporaryResource
+  private val data = context.temporaryMessage
+  private val dataOut = data.writeStream(false)
 
   def mail(mail:String):SmtpTx = {
     this.mail = Some(mail)
@@ -145,8 +146,11 @@ class SmtpTx(context:SmtpContext) {
     this
   }
 
+  val encoding = "iso-8859-1"
+  val crlf = "\r\n".getBytes(encoding)
   def data(data: String):SmtpTx = {
-    this.data.append(data.getBytes("iso-8859-1"))
+    dataOut.write(data.getBytes(encoding))
+    dataOut.write(crlf)
     this
   }
 
@@ -157,15 +161,7 @@ class SmtpTx(context:SmtpContext) {
   def commit:Unit = {
     // prevent any further usage
     state = sCommitted
-
-    val file = new File("D:\\temp\\w" + System.currentTimeMillis + ".eml")
-    val out = new FileOutputStream(file)
-    try{
-      data.copyTo(out)
-    }
-    finally{
-      IOUtils.closeQuietly(out)
-    }
+    dataOut.close
   }
 }
 

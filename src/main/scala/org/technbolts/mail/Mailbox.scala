@@ -2,93 +2,12 @@ package org.technbolts.mail
 
 import org.slf4j.{Logger, LoggerFactory}
 import java.io._
-import collection.mutable.{ListBuffer, HashSet}
-import org.apache.commons.io.IOUtils
+import collection.mutable.HashSet
 import org.technbolts.util.EventDispatcher
+import java.util.concurrent.atomic.AtomicInteger
+import java.text.SimpleDateFormat
+import java.util.Date
 
-class Message(val file:File) {
-  private val logger: Logger = LoggerFactory.getLogger(classOf[Message])
-
-  val CRLF = "\r\n"
-  var encoding = "iso-8859-1"
-
-  def size = if(file.exists) file.length else 0L
-  def timestamp = if(file.exists) file.lastModified else 0L
-
-  private var deleted = false
-  def delete:Unit = deleted=true
-  def undelete:Unit = deleted=false
-  def isDeleted = deleted
-
-  def deleteFile:Unit = file.exists match {
-      case true => file.delete match {
-        case false => logger.warn("Failed to delete <" + file.getAbsolutePath + ">")
-        case true => logger.debug("File <" + file.getAbsolutePath + "> deleted!")
-      }
-      case false => logger.warn("Nothing to delete <" + file.getAbsolutePath + ">")
-  }
-
-  def uniqueId:String = {
-    val msgid = "message-id: "
-    headers.find( _.toLowerCase.startsWith(msgid) ) match {
-      case None => file.getName
-      case Some(line) => line.substring(msgid.length)
-    }
-  }
-
-  def headers:List[String] = {
-    val lines = new ListBuffer[String] ()
-    val writer = (s:String)=> { lines.append(s) }
-    writeTo(writer, Some(0))
-    lines.toList
-  }
-
-  def writeTo(writer:Writer, nbLines:Option[Int]):Unit = {
-    val write = (s:String)=> {
-      writer.write(s)
-      writer.write(CRLF)
-    }
-    writeTo(write, nbLines)
-  }
-
-  def writeTo(writer:(String)=>Unit, nbLines:Option[Int]):Unit = {
-    val inputStream: FileInputStream = new FileInputStream(file)
-    try {
-      val content = new BufferedReader(new InputStreamReader(inputStream, encoding))
-
-      // initial potential empty lines
-      var line: String = content.readLine
-      while (line != null && line.length == 0) {
-        writer(line)
-        line = content.readLine
-      }
-
-      // write headers
-      while (line != null && line.length > 0) {
-        writer(line)
-        line = content.readLine
-      }
-
-      // empty lines separating header from body
-      while (line != null && line.length == 0) {
-        writer(line)
-        line = content.readLine
-      }
-
-      // write the TOP nbLines of the body
-      var remaining = nbLines.getOrElse(Integer.MAX_VALUE)
-      while (line != null && remaining > 0) {
-        writer(line)
-        remaining = remaining - 1
-        line = content.readLine
-      }
-    }
-    finally{
-      IOUtils.closeQuietly(inputStream)
-    }
-  }
-
-}
 
 object MailboxRepository {
   def get:MailboxRepository = {
@@ -104,6 +23,11 @@ class MailboxRepository(rootDir:File) {
 
   val listeners = new EventDispatcher[MailboxEvent]
 
+  val temporaryMessageDir = new File(rootDir, "temporary")
+  if(!temporaryMessageDir.exists)
+    temporaryMessageDir.mkdirs
+  logger.info("Temporary messages saved in {}", temporaryMessageDir.getAbsolutePath)
+
   private val locked = new HashSet[String]
   def acquireMailbox(user:User)(pf:PartialFunction[Option[Mailbox],Unit]):Unit = {
     try{
@@ -111,7 +35,9 @@ class MailboxRepository(rootDir:File) {
             locked.add(user.login) match {
               case true =>
                 logger.info("Mailbox <{}> locked", user.login)
-                val mbox = new Mailbox (user, rootDir)
+
+                val mailboxDir = new File(rootDir, user.login)
+                val mbox = new Mailbox (user, mailboxDir)
                 listeners.publishEvent(OnMailboxLoaded(mbox))
                 Some(mbox)
               case false =>
@@ -127,20 +53,27 @@ class MailboxRepository(rootDir:File) {
       }
     }
   }
+
+  private val idCounter = new AtomicInteger
+  private val dateFormat = new SimpleDateFormat("yyyy-MM-dd~HH-mm-ss")
+
+  def temporaryMessage:Message = {
+    val fileName = "t" + dateFormat.format(new Date) + "~" + idCounter.incrementAndGet + ".eml"
+    val msgFile = new File(temporaryMessageDir, fileName)
+    new Message(msgFile)
+  }
+
 }
 
-class Mailbox(user:User, rootDir:File) {
-
-  var doDelete:(Message)=>Unit = { _.deleteFile }
+class Mailbox(user:User, mailboxDir:File) {
+  var doDelete:(Message)=>Unit = { _.delete }
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[Mailbox])
 
-  val mailboxDir = new File(rootDir, user.login)
+  logger.info("Mailbox for user <{}> located at: {}", user.login, mailboxDir.getAbsolutePath)
   if(!mailboxDir.exists)
     mailboxDir.mkdirs
   
-  logger.info("Mailbox for user <{}> located at: {}", user.login, mailboxDir.getAbsolutePath)
-
   def getNumberOfMessage:Int = messages.size
 
   def getSizeOfAllMessage:Long = messages.foldLeft(0L)((acc,msg) => acc+msg.size)
@@ -162,5 +95,5 @@ class Mailbox(user:User, rootDir:File) {
     }
   }
 
-  def processDeleted:Unit = messages.filter( _.isDeleted ).foreach( (m)=> doDelete(m) )
+  def processDeleted:Unit = messages.filter( _.isMarkedAsDeleted ).foreach( (m)=> doDelete(m) )
 }

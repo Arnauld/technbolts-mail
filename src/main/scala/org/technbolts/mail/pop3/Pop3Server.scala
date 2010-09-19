@@ -522,7 +522,7 @@ class Pop3Session(val pid: String,
       mailbox.getMessage(msgid - 1) match {
         case None => writeErr("Message not found")
         case Some(msg) =>
-          if (msg.isDeleted)
+          if (msg.isMarkedAsDeleted)
             writeErr("Message deleted.")
           else {
             writeOk(msgid + " " + msg.size)
@@ -598,7 +598,7 @@ class Pop3Session(val pid: String,
    *         The POP3 server marks the message as deleted.  Any future
    *          reference to the message-number associated with the message
    *         in a POP3 command generates an error.  The POP3 server does
-   *         not actually delete the message until the POP3 session
+   *         not actually markDeleted the message until the POP3 session
    *         enters the UPDATE state.
    *
    *     Possible Responses:
@@ -619,10 +619,10 @@ class Pop3Session(val pid: String,
       mailbox.getMessage(msgid - 1) match {
         case None => writeErr("Message not found")
         case Some(msg) =>
-          if (msg.isDeleted)
+          if (msg.isMarkedAsDeleted)
             writeErr("Message already deleted.")
           else {
-            msg.delete
+            msg.markAsDeleted
             writeOk
           }
       }
@@ -678,7 +678,7 @@ class Pop3Session(val pid: String,
    * </pre>
    */
   def handleRset: PartialFunction[Pop3Command, Unit] = {
-    case Pop3Command(RSET, _) => mailbox.messages.foreach(_.undelete)
+    case Pop3Command(RSET, _) => mailbox.messages.foreach(_.unmarkAsDeleted)
   }
 
   val msgidAndLinePattern = """([0-9]+) ([0-9]+)""".r
@@ -800,7 +800,7 @@ class Pop3Session(val pid: String,
       mailbox.getMessage(msgid - 1) match {
         case None => writeErr("Message not found")
         case Some(msg) =>
-          if (msg.isDeleted)
+          if (msg.isMarkedAsDeleted)
             writeErr("Message deleted.")
           else {
             writeOk(msgid + " " + msg.uniqueId)

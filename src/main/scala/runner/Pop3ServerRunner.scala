@@ -17,7 +17,7 @@ object Pop3ServerRunner {
     val server:Pop3Server = Pop3Server(port)
 
     /*
-     * keep message on delete
+     * keep message on markDeleted
      */
     System.out.print("POP3 keep mail on delete (y/n) [y]: ")
     val keepStr = Source.fromInputStream(System.in).getLines.next
