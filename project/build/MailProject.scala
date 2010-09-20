@@ -13,11 +13,14 @@ class MailProject(info: ProjectInfo) extends DefaultProject(info) {
     val commonsIO = "1.4"
     val mail = "1.4.1"
     val spring = "3.0.4.RELEASE"
+    val netty = "3.2.2.Final"
     //
     val junit = "4.8.1"
     val scala_specs = "1.6.5"
     val mockito = "1.8.5"
   }
+
+  val jbossRepo = "repository.jboss.org" at "http://repository.jboss.org/nexus/content/groups/public/"
 
   // Use ivy directly to use exclude behavior
   override def ivyXML =
@@ -27,6 +30,7 @@ class MailProject(info: ProjectInfo) extends DefaultProject(info) {
       <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
         <dependency org="commons-io" name="commons-io" rev={Version.commonsIO}/>
         <dependency org="javax.mail" name="mail" rev={Version.mail}/>
+        <dependency org="org.jboss.netty" name="netty" rev={Version.netty} />
 
       <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
       <!--     Spring       -->
