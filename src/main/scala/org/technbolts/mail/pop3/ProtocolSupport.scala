@@ -71,10 +71,7 @@ trait ProtocolSupport {
 
   def readCommand: Pop3Command = {
     val line = readLine
-    val command = line.indexOf(" ") match {
-      case indexOf if indexOf > -1 => Pop3Command(line.substring(0, indexOf), Some(line.substring(indexOf + 1)))
-      case _ => Pop3Command(line, None)
-    }
+    val command = Pop3Command.lineToCommand(line)
     logger.info("Received: {}", command)
     command
   }
