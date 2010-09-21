@@ -6,8 +6,6 @@ import java.io._
 import org.technbolts.mail.MailboxRepository
 import java.net.{SocketTimeoutException, ServerSocket}
 import org.technbolts.util.{EventDispatcher, LangUtils}
-import collection.mutable.ListBuffer
-import org.apache.commons.io.{FileUtils, IOUtils}
 
 object SmtpServer {
   def apply(): SmtpServer = apply(25)
