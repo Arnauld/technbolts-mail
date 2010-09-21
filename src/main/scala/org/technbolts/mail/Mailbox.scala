@@ -31,26 +31,28 @@ class MailboxRepository(rootDir:File) {
   private val locked = new HashSet[String]
   def acquireMailbox(user:User)(pf:PartialFunction[Option[Mailbox],Unit]):Unit = {
     try{
-      pf( synchronized {
-            locked.add(user.login) match {
-              case true =>
-                logger.info("Mailbox <{}> locked", user.login)
-
-                val mailboxDir = new File(rootDir, user.login)
-                val mbox = new Mailbox (user, mailboxDir)
-                listeners.publishEvent(OnMailboxLoaded(mbox))
-                Some(mbox)
-              case false =>
-                logger.warn("Mailbox <{}> already locked", user.login)
-                None
-            }
-          } )
+      pf( lockAndGetMailbox(user) )
     }
     finally{
       synchronized {
         logger.info("Mailbox <{}> unlocked", user.login)
         locked.remove(user.login)
       }
+    }
+  }
+
+  def lockAndGetMailbox(user:User):Option[Mailbox] = {
+    synchronized { locked.add(user.login) } match {
+      case true =>
+        logger.info("Mailbox <{}> locked", user.login)
+
+        val mailboxDir = new File(rootDir, user.login)
+        val mbox = new Mailbox (user, mailboxDir)
+        listeners.publishEvent(OnMailboxLoaded(mbox))
+        Some(mbox)
+      case false =>
+        logger.warn("Mailbox <{}> already locked", user.login)
+        None
     }
   }
 
