@@ -46,7 +46,6 @@ class Pop3Server(val port: Int, val mailboxRepository: MailboxRepository) {
     while (state.isRunning) {
       try {
         val socket = serverSocket.accept
-        listeners.publishEvent(OnPop3SessionPreInit(this, socket))
 
         /**remote identity */
         val remoteAddress = socket.getInetAddress();
