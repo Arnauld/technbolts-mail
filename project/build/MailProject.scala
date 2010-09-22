@@ -10,7 +10,6 @@ class MailProject(info: ProjectInfo) extends DefaultProject(info) {
     val slf4j = "1.6.1"
     val scala = "2.8.0"
     //
-    val netty = "3.2.2.Final"
     val commonsIO = "1.4"
     val mail = "1.4.1"
     val spring = "3.0.4.RELEASE"

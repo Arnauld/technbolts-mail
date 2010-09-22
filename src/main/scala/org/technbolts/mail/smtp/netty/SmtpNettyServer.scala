@@ -11,6 +11,7 @@ import org.jboss.netty.channel._
 import java.net.{InetAddress, InetSocketAddress}
 import org.technbolts.mail.smtp.SmtpCommand
 
+/*
 class SmtpNettyServer(port: Int) {
   private val logger: Logger = LoggerFactory.getLogger(classOf[SmtpNettyServer])
   logger.info("Smtp (netty) Server starting on port <" + port + ">")
@@ -226,3 +227,4 @@ class InitialSmtpSession extends SmtpSession {
     (handleEhlo orElse handleQuit orElse handleMail) (call.command)
 }
 
+*/

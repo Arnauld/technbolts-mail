@@ -25,13 +25,12 @@ class Pop3ServerSpecs extends Specification {
 
   "Pop3Server" should {
     doFirst {
+      println("doFirst#1")
       server = Env.startServer(port)
-    }
-    doLast {
-      server.stop
+      println("doFirst#2")
     }
     "handle new connection from javamail" in {
-
+      println("doFirst#3")
 
       val props = new Properties
       val session = Session.getDefaultInstance(props, null)
@@ -60,6 +59,9 @@ class Pop3ServerSpecs extends Specification {
       // Close connection
       folder.close(false)
       store.close()
+      server.stop
+    }
+    doLast {
       server.stop
     }
   }
