@@ -25,13 +25,9 @@ class Pop3ServerSpecs extends Specification {
 
   "Pop3Server" should {
     doFirst {
-      println("doFirst#1")
       server = Env.startServer(port)
-      println("doFirst#2")
     }
     "handle new connection from javamail" in {
-      println("doFirst#3")
-
       val props = new Properties
       val session = Session.getDefaultInstance(props, null)
       val store = session.getStore("pop3")
