@@ -34,12 +34,18 @@ class MailboxRepository(rootDir:File) {
       pf( lockAndGetMailbox(user) )
     }
     finally{
-      synchronized {
-        logger.info("Mailbox <{}> unlocked", user.login)
-        locked.remove(user.login)
-      }
+      unlockMailbox(user)
     }
   }
+
+  def unlockMailbox(user:User):Unit = {
+    synchronized {
+      logger.info("Mailbox <{}> unlocked", user.login)
+      locked.remove(user.login)
+    }
+  }
+
+  def unlockMailbox(mailbox:Mailbox):Unit = unlockMailbox(mailbox.user)
 
   def lockAndGetMailbox(user:User):Option[Mailbox] = {
     synchronized { locked.add(user.login) } match {
@@ -67,7 +73,7 @@ class MailboxRepository(rootDir:File) {
 
 }
 
-class Mailbox(user:User, mailboxDir:File) {
+class Mailbox(val user:User, val mailboxDir:File) {
   var doDelete:(Message)=>Unit = { _.delete }
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[Mailbox])

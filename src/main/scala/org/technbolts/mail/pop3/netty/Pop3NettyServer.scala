@@ -10,9 +10,9 @@ import org.jboss.netty.channel._
 import group.{ChannelGroupFuture, ChannelGroup, DefaultChannelGroup}
 import org.jboss.netty.buffer.ChannelBuffers
 import org.technbolts.util.EventDispatcher
-import org.technbolts.mail.pop3.{UnsupportedCommandException, Pop3Command}
 import java.net.InetSocketAddress
 import org.technbolts.mail._
+import pop3._
 
 class Pop3NettyServer(val port: Int, val mailboxRepository: MailboxRepository) extends Pop3Server {
   val logger: Logger = LoggerFactory.getLogger(classOf[Pop3NettyServer])
@@ -142,6 +142,12 @@ class Pop3ServerHandler(val context: Pop3Server) extends SimpleChannelUpstreamHa
     super.channelConnected(ctx, e)
   }
 
+
+  override def channelClosed(ctx: ChannelHandlerContext, e: ChannelStateEvent) = {
+    session.dispose
+    super.channelClosed(ctx, e)
+  }
+
   override def exceptionCaught(ctx: ChannelHandlerContext, e: ExceptionEvent): Unit = {
     logger.warn("Unexpected exception from downstream.", e.getCause)
     e.getChannel.close
@@ -163,12 +169,27 @@ class Pop3ServerHandler(val context: Pop3Server) extends SimpleChannelUpstreamHa
   }
 }
 
+
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  base class for Netty Pop3 Session
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+trait Pop3NettySession {
+  def newClosed(e:ChannelEvent) = new Pop3NettySessionClosed
+}
+
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  Closed
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+class Pop3NettySessionClosed extends Pop3SessionClosed[ChannelEvent] with Pop3NettySession with Pop3IONettyAdapter {
+  override def newClosed(e:ChannelEvent) = this
+}
+
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  Authorization
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 class Pop3NettySessionAuthorization (
         val credentials: Credentials,
-        val serverContext: Pop3Server) extends Pop3SessionAuthorization[ChannelEvent] {
+        val serverContext: Pop3Server) extends Pop3SessionAuthorization[ChannelEvent] with Pop3NettySession with Pop3IONettyAdapter {
 
   override def newTransaction(mailbox: Mailbox) =
     new Pop3NettySessionTransaction(mailbox, serverContext)
@@ -182,5 +203,5 @@ class Pop3NettySessionAuthorization (
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 class Pop3NettySessionTransaction(
         val mailbox:Mailbox,
-        val serverContext: Pop3Server) extends Pop3SessionTransaction[ChannelEvent] {
+        val serverContext: Pop3Server) extends Pop3SessionTransaction[ChannelEvent] with Pop3NettySession with Pop3IONettyAdapter {
 }

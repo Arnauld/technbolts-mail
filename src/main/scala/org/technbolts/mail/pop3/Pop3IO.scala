@@ -1,9 +1,10 @@
-package org.technbolts.mail.pop3.netty
+package org.technbolts.mail.pop3
 
 import org.slf4j.{LoggerFactory, Logger}
 
 trait Pop3IO[T] {
-  def logger: Logger = LoggerFactory.getLogger(classOf[Pop3IO])
+  private abstract class Pop3IOLogger
+  private val logger: Logger = LoggerFactory.getLogger(classOf[Pop3IOLogger])
 
   val CRLF = "\r\n"
 
